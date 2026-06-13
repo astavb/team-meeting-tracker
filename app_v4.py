@@ -51,22 +51,43 @@ st.markdown('<div class="main-title">📋 Team Meeting Tracker V4</div>', unsafe
 
 menu = st.sidebar.radio(
     "Navigation",
-    ["📋 Meeting Report","📊 Dashboard","⚙️ Task Management","📥 Reports"]
+    [
+        "📋 Meeting Report",
+        "📊 Dashboard",
+        "⚙️ Task Management",
+        "🚫 Absent Tracker",
+        "📥 Reports"
+    ]
 )
 
 # ---------- MEETING REPORT ----------
+# ---------- MEETING REPORT ----------
 if menu == "📋 Meeting Report":
+
     st.header("Daily Meeting Report")
+
+    employees = get_employees()
+
+    selected_emp = st.selectbox(
+        "Filter Employee",
+        ["All"] + employees
+    )
 
     rows = []
 
-    for emp in get_employees():
+    if selected_emp == "All":
+        employee_list = employees
+    else:
+        employee_list = [selected_emp]
+
+    for emp in employee_list:
 
         cursor.execute("""
         SELECT task_name
         FROM tasks
         WHERE employee_name=? AND status='Assigned'
         """,(emp,))
+
         assigned = [x[0] for x in cursor.fetchall()]
 
         cursor.execute("""
@@ -76,11 +97,15 @@ if menu == "📋 Meeting Report":
         """,(emp,))
 
         pending_items = []
-        for task_name,assigned_date in cursor.fetchall():
+
+        for task_name, assigned_date in cursor.fetchall():
+
             days = (
-                datetime.today().date() -
+                datetime.today().date()
+                -
                 datetime.strptime(
-                    assigned_date,"%Y-%m-%d"
+                    assigned_date,
+                    "%Y-%m-%d"
                 ).date()
             ).days
 
@@ -88,17 +113,99 @@ if menu == "📋 Meeting Report":
                 f"{task_name} ({days} Days)"
             )
 
-        rows.append({
-            "Employee":emp,
-            "Assigned Tasks":"\n".join(assigned),
-            "Pending Tasks":"\n".join(pending_items)
-        })
+        cursor.execute(
+            """
+            SELECT absent_days, reason
+            FROM absentees
+            WHERE employee_name=?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (emp,)
+        )
 
-    st.dataframe(
-        pd.DataFrame(rows),
-        use_container_width=True,
-        height=600
-    )
+        abs_row = cursor.fetchone()
+
+        if abs_row:
+            absent_text = f"{abs_row[0]} Days ({abs_row[1]})"
+        else:
+            absent_text = "0"
+
+        rows.append({
+    "Employee": emp,
+    "Assigned Tasks": "<br>".join(
+        [f"• {task}" for task in assigned]
+    ),
+    "Pending Tasks": "<br>".join(
+        [f"• {task}" for task in pending_items]
+    ),
+    "Absent": absent_text
+})
+
+    meeting_df = pd.DataFrame(rows)
+
+    # rows.append(...) loop ends here
+
+    meeting_df = pd.DataFrame(rows)
+
+    st.markdown("""
+<style>
+.report-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.report-table th {
+    background-color: #1f2937;
+    color: white;
+    padding: 12px;
+    text-align: left;
+    border: 1px solid #374151;
+}
+
+.report-table td {
+    padding: 15px;
+    border: 1px solid #374151;
+    vertical-align: top;
+    white-space: normal;
+    word-wrap: break-word;
+    line-height: 1.8;
+}
+
+.report-table th:nth-child(1),
+.report-table td:nth-child(1){
+    width:15%;
+}
+
+.report-table th:nth-child(2),
+.report-table td:nth-child(2){
+    width:40%;
+}
+
+.report-table th:nth-child(3),
+.report-table td:nth-child(3){
+    width:35%;
+}
+
+.report-table th:nth-child(4),
+.report-table td:nth-child(4){
+    width:10%;
+}
+
+.report-table tr:nth-child(even) {
+    background-color: #111827;
+}
+</style>
+""", unsafe_allow_html=True)
+
+    st.markdown(
+    meeting_df.to_html(
+        escape=False,
+        index=False,
+        classes="report-table"
+    ),
+    unsafe_allow_html=True
+)
 
 # ---------- DASHBOARD ----------
 elif menu == "📊 Dashboard":
@@ -163,7 +270,7 @@ elif menu == "📊 Dashboard":
 
             completed_date = row["completed_date"]
 
-            if completed_date:
+            if pd.notna(completed_date) and str(completed_date).strip():
 
                 completed_dt = datetime.strptime(
                     completed_date,
@@ -295,7 +402,91 @@ elif menu == "⚙️ Task Management":
                         ))
                         conn.commit()
                         st.rerun()
+# ---------- ABSENT TRACKER ----------
+elif menu == "🚫 Absent Tracker":
 
+    st.header("Absent Employees")
+
+    employees = get_employees()
+
+    if employees:
+
+        emp = st.selectbox(
+            "Employee",
+            employees
+        )
+
+        absent_days = st.number_input(
+            "Absent Days",
+            min_value=1,
+            value=1
+        )
+
+        reason = st.text_input(
+            "Reason"
+        )
+
+        if st.button("Save Absence"):
+
+            cursor.execute(
+                """
+                INSERT INTO absentees(
+                    employee_name,
+                    absent_days,
+                    reason
+                )
+                VALUES(?,?,?)
+                """,
+                (
+                    emp,
+                    absent_days,
+                    reason
+                )
+            )
+
+            conn.commit()
+
+            st.success("Absence Saved")
+
+            st.rerun()
+
+    abs_df = pd.read_sql_query(
+        "SELECT * FROM absentees",
+        conn
+    )
+
+    if not abs_df.empty:
+
+        st.subheader("Current Absentees")
+
+        for _, row in abs_df.iterrows():
+
+            c1, c2, c3, c4 = st.columns([3, 2, 3, 2])
+
+            c1.write(row["employee_name"])
+            c2.write(f"{row['absent_days']} Days")
+            c3.write(row["reason"])
+
+            if c4.button(
+                "✅ Present",
+                key=f"present_{row['id']}"
+            ):
+
+                cursor.execute(
+                    """
+                    DELETE FROM absentees
+                    WHERE id=?
+                    """,
+                    (int(row["id"]),)
+                )
+
+                conn.commit()
+
+                st.success(
+                    f"{row['employee_name']} marked present"
+                )
+
+                st.rerun()
 # ---------- REPORTS ----------
 elif menu == "📥 Reports":
 
