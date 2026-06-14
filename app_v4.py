@@ -409,6 +409,8 @@ elif menu == "🚫 Absent Tracker":
 
     employees = get_employees()
 
+    
+
     if employees:
 
         emp = st.selectbox(
