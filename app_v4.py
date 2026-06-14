@@ -28,6 +28,16 @@ status TEXT,
 completed_date TEXT
 )
 """)
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS absentees(
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+employee_name TEXT,
+absent_days INTEGER,
+reason TEXT
+)
+""")
+
 conn.commit()
 
 def get_employees():
